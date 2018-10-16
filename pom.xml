@@ -8,7 +8,7 @@
 	</parent>
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.red5</groupId>
-	<version>${red5-server-common.version}</version>
+	<version>${project.parent.version}</version>
 
 	<artifactId>red5-server-common</artifactId>
 	<name>Red5 :: Common server classes</name>
