@@ -1,16 +1,17 @@
 Ant Media Server Common
 ==================
 
-Please open issues on main repository https://github.com/ant-media/Ant-Media-Server/issues
+Issue는 주 repository에 생성하십시오. https://github.com/ant-media/Ant-Media-Server/issues
 
-## Customization for PUFF
+## PUFF 특화 기능
 
-`PuffAmazonS3StorageClient` class added in `me.insertcoin.pufflive.antmedia.storage` package.  
-This storage detect subdirectories in stream key and use when upload files to AWS S3.  
+`PuffAmazonS3StorageClient` 클래스가 `me.insertcoin.pufflive.antmedia.storage` 패키지 안에 추가되었습니다.
 
-New param, `storagePrefix`, in `PuffAmazonS3StorageClient` Java bean is indicating parent directories in AWS S3 bucket.
+이 스토리지는 스트림 키의 폴더구조를 인식하여 AWS S3에 파일을 업로드할 때 사용합니다.
 
-Sample setting is as follows.
+`PuffAmazonS3StorageClient` Java bean의 `storagePrefix`라는 새로운 매개변수는 AWS S3 버켓의 상위 폴더들을 설정합니다.
+
+샘플 설정은 다음과 같습니다.
 
 ```
 <bean id="app.storageClient" class="me.insertcoin.pufflive.antmedia.storage.PuffAmazonS3StorageClient">
@@ -22,6 +23,6 @@ Sample setting is as follows.
 </bean>
 ```
 
-Location of configuration file can be found in follow link.
+설정 파일의 위치는 다음의 링크를 참조하십시오.
 
 [Reference: Amazon (AWS) S3 Integration](https://github.com/ant-media/Ant-Media-Server/wiki/Amazon-(AWS)-S3-Integration#enable-aws-s3-in-your-streaming-app)
