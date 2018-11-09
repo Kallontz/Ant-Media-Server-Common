@@ -66,6 +66,8 @@ import static org.bytedeco.javacpp.avutil.av_strerror;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -73,6 +75,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import me.insertcoin.pufflive.antmedia.storage.PuffAmazonS3StorageClient;
 import org.bytedeco.javacpp.avcodec;
 import org.bytedeco.javacpp.avcodec.AVBSFContext;
 import org.bytedeco.javacpp.avcodec.AVBitStreamFilter;
@@ -184,9 +187,18 @@ public class Mp4Muxer extends Muxer {
 	 */
 	@Override
 	public void init(IScope scope, final String name, int resolutionHeight) {
-		super.init(scope, name, resolutionHeight, false);
 
-		this.streamId = name;
+		String encodedName;
+		try {
+			encodedName = (storageClient instanceof PuffAmazonS3StorageClient) ? URLEncoder.encode(name, "utf-8") : name;
+		} catch (UnsupportedEncodingException e) {
+			e.printStackTrace();
+			encodedName = name;
+		}
+
+		super.init(scope, encodedName, resolutionHeight, false);
+
+		this.streamId = encodedName;
 		this.resolution = resolutionHeight;
 
 		tmpPacket = avcodec.av_packet_alloc();

@@ -12,12 +12,13 @@ import com.amazonaws.services.s3.model.CannedAccessControlList;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import io.antmedia.storage.StorageClient;
 import org.apache.commons.lang3.exception.ExceptionUtils;
-import org.red5.server.util.FileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
 import java.nio.file.Files;
 
 public class PuffAmazonS3StorageClient extends StorageClient {
@@ -54,15 +55,25 @@ public class PuffAmazonS3StorageClient extends StorageClient {
     }
 
     public void save(final File file, FileType type) {
-        final String filePath = file.getPath();
+        String decodedPath;
+
+        try {
+            decodedPath = URLDecoder.decode(file.getPath(), "utf-8");
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+            decodedPath = file.getPath();
+        }
+
+        final String filePath = decodedPath;
+        final String decodedFileName = decodedPath.substring(decodedPath.lastIndexOf(File.separator) + File.separator.length());
         final int pathPrefixEndIdx = filePath.indexOf("/streams/") + 9;
-        final int pathSuffixStartIdx = filePath.indexOf(file.getName());
+        final int pathSuffixStartIdx = filePath.indexOf(decodedFileName);
 
         final String relativePath = filePath.substring(pathPrefixEndIdx, pathSuffixStartIdx);
         final String s3Path = (storagePrefix != null ? storagePrefix : type.getValue()) + File.separator + relativePath;
 
         final AmazonS3 s3 = getAmazonS3();
-        final PutObjectRequest putRequest = new PutObjectRequest(getStorageName(), s3Path + file.getName(), file);
+        final PutObjectRequest putRequest = new PutObjectRequest(getStorageName(), s3Path + decodedFileName, file);
 
         putRequest.setCannedAcl(CannedAccessControlList.PublicRead);
         putRequest.setGeneralProgressListener(new ProgressListener() {
@@ -74,12 +85,6 @@ public class PuffAmazonS3StorageClient extends StorageClient {
                 } else if (event.getEventType() == ProgressEventType.TRANSFER_COMPLETED_EVENT) {
                     try {
                         Files.delete(file.toPath());
-
-                        if (relativePath.length() > 0) {
-                            final String subPathRoot = filePath.substring(0, filePath.indexOf(File.separator, pathPrefixEndIdx));
-                            FileUtil.deleteDirectory(subPathRoot);
-                        }
-
                     } catch (IOException e) {
                         logger.error(ExceptionUtils.getStackTrace(e));
                     }
