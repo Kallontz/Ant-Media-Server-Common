@@ -56,11 +56,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
 
-
-
 import io.antmedia.AppSettings;
 import io.antmedia.EncoderSettings;
-
+import io.antmedia.datastore.db.IDataStore;
+import io.antmedia.datastore.db.IDataStoreFactory;
+import io.antmedia.datastore.db.types.Broadcast;
 import io.antmedia.storage.StorageClient;
 
 public class MuxAdaptor implements IRecordingListener, IScheduledJob {
@@ -111,7 +111,8 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 	protected String hlsPlayListType;
 	List<EncoderSettings> adaptiveResolutionList = null;
 	protected AVPacket pkt = avcodec.av_packet_alloc();
-	
+	protected IDataStore dataStore;
+
 	/**
 	 * By default first video key frame should be checked 
 	 * and below flag should be set to true
@@ -140,6 +141,9 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 	private long firstPacketTime = -1;
 	private boolean audioOnly= false;
 	private long lastQualityUpdateTime = 0;
+	private Broadcast broadcast;
+
+
 
 	private static Read_packet_Pointer_BytePointer_int readCallback = new Read_packet_Pointer_BytePointer_int() {
 
@@ -264,16 +268,16 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 		encoderSettingsList = appSettings.getAdaptiveResolutionList();
 		previewCreatePeriod = appSettings.getCreatePreviewPeriod();
 	}
-	
+
 	public void initStorageClient() {
 		if (scope.getContext().getApplicationContext().containsBean(StorageClient.BEAN_NAME)) {
 			storageClient = (StorageClient) scope.getContext().getApplicationContext().getBean(StorageClient.BEAN_NAME);
 		}
 	}
-	
+
 	protected void initScheduler() {
 		scheduler = (QuartzSchedulingService) scope.getParent().getContext().getBean(QuartzSchedulingService.BEAN_NAME);
-		
+
 	}
 
 	@Override
@@ -286,12 +290,14 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 			logger.warn("scheduler is not available in beans for {}", name);
 			return false;
 		}
-		
-		
+
+		initializeDataStore();
 		enableSettings();
 		initStorageClient();
+	
 
-		if (mp4MuxingEnabled) {
+
+		if ((getBroadcast() == null && mp4MuxingEnabled) || (getBroadcast().getMp4Enabled() == 1 || (mp4MuxingEnabled && getBroadcast().getMp4Enabled() == 0))) {
 			Mp4Muxer mp4Muxer = new Mp4Muxer(storageClient, scheduler);
 			mp4Muxer.setAddDateTimeToSourceName(addDateTimeToMp4FileName);
 			mp4Muxer.setBitstreamFilter(mp4Filtername);
@@ -433,6 +439,15 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 
 	}
 
+	public IDataStore initializeDataStore() {
+		if(dataStore == null) {
+
+			IDataStoreFactory dsf = (IDataStoreFactory) scope.getContext().getBean(IDataStoreFactory.BEAN_NAME);
+			dataStore = dsf.getDataStore();
+		}
+		return dataStore;
+	}
+
 	@Override
 	public void execute(ISchedulingService service) throws CloneNotSupportedException {
 
@@ -514,7 +529,7 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 				return;
 			}
 		}
-		
+
 		for (Muxer muxer : muxerList) {
 			muxer.writePacket(pkt, stream);
 		}
@@ -853,6 +868,20 @@ public class MuxAdaptor implements IRecordingListener, IScheduledJob {
 	 */
 	public void setFirstKeyFrameReceivedChecked(boolean firstKeyFrameReceivedChecked) {
 		this.firstKeyFrameReceivedChecked = firstKeyFrameReceivedChecked;
+	}
+	
+	public Broadcast getBroadcast() {
+		
+		if(broadcast == null) {
+			
+			broadcast = dataStore.get(this.streamId);
+		}
+		return broadcast;
+	}
+
+	// this is for test cases
+	public void setBroadcast(Broadcast broadcast) {
+		this.broadcast = broadcast;
 	}
 
 }
