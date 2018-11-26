@@ -2,9 +2,7 @@ package me.insertcoin.pufflive.antmedia.storage;
 
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.event.ProgressEvent;
 import com.amazonaws.event.ProgressEventType;
-import com.amazonaws.event.ProgressListener;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
@@ -76,20 +74,16 @@ public class PuffAmazonS3StorageClient extends StorageClient {
         final PutObjectRequest putRequest = new PutObjectRequest(getStorageName(), s3Path + decodedFileName, file);
 
         putRequest.setCannedAcl(CannedAccessControlList.PublicRead);
-        putRequest.setGeneralProgressListener(new ProgressListener() {
-
-            @Override
-            public void progressChanged(ProgressEvent event) {
-                if (event.getEventType() == ProgressEventType.TRANSFER_FAILED_EVENT) {
-                    logger.error("S3 - Error: Upload failed for {}", file.getName());
-                } else if (event.getEventType() == ProgressEventType.TRANSFER_COMPLETED_EVENT) {
-                    try {
-                        Files.delete(file.toPath());
-                    } catch (IOException e) {
-                        logger.error(ExceptionUtils.getStackTrace(e));
-                    }
-                    logger.info("File {} uploaded to S3", s3Path + file.getName());
+        putRequest.setGeneralProgressListener(event -> {
+            if (event.getEventType() == ProgressEventType.TRANSFER_FAILED_EVENT) {
+                logger.error("S3 - Error: Upload failed for {}", file.getName());
+            } else if (event.getEventType() == ProgressEventType.TRANSFER_COMPLETED_EVENT) {
+                try {
+                    Files.delete(file.toPath());
+                } catch (IOException e) {
+                    logger.error(ExceptionUtils.getStackTrace(e));
                 }
+                logger.info("File {} uploaded to S3", s3Path + file.getName());
             }
         });
         s3.putObject(putRequest);
