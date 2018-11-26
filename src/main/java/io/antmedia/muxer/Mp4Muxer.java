@@ -69,11 +69,7 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import me.insertcoin.pufflive.antmedia.storage.PuffAmazonS3StorageClient;
 import org.bytedeco.javacpp.avcodec;
@@ -368,7 +364,16 @@ public class Mp4Muxer extends Muxer {
 			}
 		}
 
-		ret = avformat_write_header(context, optionsDictionary);		
+		final Map<String, String> metadata = new HashMap<>();
+//		metadata.put("copyright", "Starship Vending-machine Corp.");
+		metadata.put("creation_time", new Date().toInstant().toString());
+
+		final AVDictionary metadataDic = new AVDictionary(null);
+		for (Map.Entry<String, String> e : metadata.entrySet()) {
+			av_dict_set(metadataDic, e.getKey(), e.getValue(), 0);
+		}
+
+		ret = avformat_write_header(context.metadata(metadataDic), optionsDictionary);
 		if (ret < 0) {
 			logger.warn("could not write header for {}", fileTmp.getName());
 
