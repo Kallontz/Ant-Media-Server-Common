@@ -148,6 +148,17 @@ public class AppSettings {
 	 * This is a script file path that is called by Runtime when muxing is finished
 	 */
 	private String muxerFinishScript;
+	
+	/**
+	 * Framerate parameter for WebRTC encoder 
+	 */
+	private int webRTCFrameRate;
+	
+	/**
+	 * If it's enabled, interactivity(like, comment,) is collected from social media channel
+	 */
+	private boolean collectSocialMediaActivity = false;
+	
 
 	public boolean isAddDateTimeToMp4FileName() {
 		return addDateTimeToMp4FileName;
@@ -438,5 +449,21 @@ public class AppSettings {
 	
 	public void setMuxerFinishScript(String muxerFinishScript) {
 		this.muxerFinishScript = muxerFinishScript;
+	}
+
+	public int getWebRTCFrameRate() {
+		return webRTCFrameRate;
+	}
+
+	public void setWebRTCFrameRate(int webRTCFrameRate) {
+		this.webRTCFrameRate = webRTCFrameRate;
+	}
+
+	public boolean isCollectSocialMediaActivity() {
+		return collectSocialMediaActivity;
+	}
+
+	public void setCollectSocialMediaActivity(boolean collectSocialMediaActivity) {
+		this.collectSocialMediaActivity = collectSocialMediaActivity;
 	}
 }
