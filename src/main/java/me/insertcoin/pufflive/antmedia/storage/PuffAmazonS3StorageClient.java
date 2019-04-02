@@ -6,8 +6,9 @@ import com.amazonaws.event.ProgressEventType;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.CannedAccessControlList;
-import com.amazonaws.services.s3.model.PutObjectRequest;
+import com.amazonaws.services.s3.model.*;
+import com.amazonaws.services.s3.transfer.TransferManager;
+import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
 import com.google.gson.JsonObject;
 import io.antmedia.storage.StorageClient;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -29,6 +30,8 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,8 +43,12 @@ public class PuffAmazonS3StorageClient extends StorageClient {
     private static final Pattern PATTERN_STREAM_KEY_NAME
             = Pattern.compile("^(\\b[0-9A-Fa-f]{4}\\b-\\d{4}-\\d{2}-\\d{2}\\/\\d{10}_.{6})_\\d{3}\\.mp4$");
 
+    private static final long DEFAULT_FILE_PART_SIZE = 5 * 1024 * 1024; // 5MB
+    private static long FILE_PART_SIZE = DEFAULT_FILE_PART_SIZE;
+
     private CloseableHttpClient client;
-    private AmazonS3 amazonS3;
+    private AmazonS3 s3Client;
+    private BasicAWSCredentials awsCredentials;
 
     private String storagePrefix;
     private String apiBaseUri;
@@ -53,17 +60,28 @@ public class PuffAmazonS3StorageClient extends StorageClient {
     }
 
     private AmazonS3 getAmazonS3() {
-        if (amazonS3 == null) {
-            final BasicAWSCredentials awsCredentials = new BasicAWSCredentials(getAccessKey(), getSecretKey());
+        if (s3Client == null) {
+            this.awsCredentials = new BasicAWSCredentials(getAccessKey(), getSecretKey());
 
             final AmazonS3ClientBuilder awsClientBuilder =
                     AmazonS3Client.builder().withCredentials(new AWSStaticCredentialsProvider(awsCredentials));
 
             awsClientBuilder.setRegion(getRegion());
 
-            amazonS3 = awsClientBuilder.build();
+            this.s3Client = awsClientBuilder.build();
         }
-        return amazonS3;
+        return s3Client;
+    }
+
+    private TransferManager getTransperManager() {
+        if (s3Client == null) {
+            getAmazonS3();
+        }
+
+        return TransferManagerBuilder.standard()
+                .withS3Client(s3Client)
+                .withMultipartUploadThreshold(FILE_PART_SIZE)
+                .build();
     }
 
 
@@ -92,14 +110,100 @@ public class PuffAmazonS3StorageClient extends StorageClient {
                 decodedPath = file.getPath();
             }
 
+            final String bucketName = getStorageName();
             final String filePath = decodedPath;
             final String decodedFileName = decodedPath.substring(decodedPath.lastIndexOf(File.separator) + File.separator.length());
             final int pathPrefixEndIdx = filePath.indexOf("/streams/") + 9;
             final int pathSuffixStartIdx = filePath.indexOf(decodedFileName);
 
+
             final String relativePath = filePath.substring(pathPrefixEndIdx, pathSuffixStartIdx);
             final String s3Path = (storagePrefix != null ? storagePrefix : type.getValue()) + File.separator + relativePath;
+            final String s3FileName = s3Path + decodedFileName;
 
+            List<PartETag> partETags = new ArrayList<PartETag>();
+            List<MultiPartFileUploader> uploaders = new ArrayList<MultiPartFileUploader>();
+
+//            final AmazonS3 s3Client = getAmazonS3();
+            final TransferManager transferManager = getTransperManager();
+//            InitiateMultipartUploadRequest initRequest = new InitiateMultipartUploadRequest(bucketName, s3Path + decodedFileName);
+            InitiateMultipartUploadRequest initRequest = new InitiateMultipartUploadRequest(bucketName, s3FileName);
+            InitiateMultipartUploadResult initResponse = s3Client.initiateMultipartUpload(initRequest);
+            long contentLength = file.length();
+
+            try {
+                // Step 2: Upload parts.
+                long filePosition = 0;
+                long partSize = 0;
+                for (int i = 1; filePosition < contentLength; i++) {
+                    // Last part can be less than part size. Adjust part size.
+                    partSize = Math.min(FILE_PART_SIZE, (contentLength - filePosition));
+
+                    // Create request to upload a part.
+                    UploadPartRequest uploadRequest =
+                            new UploadPartRequest().
+                                    withBucketName(bucketName).withKey(s3FileName).
+                                    withUploadId(initResponse.getUploadId()).withPartNumber(i).
+                                    withFileOffset(filePosition).
+                                    withFile(file).
+                                    withPartSize(partSize);
+
+                    uploadRequest.setGeneralProgressListener(event -> {
+                        if (event.getEventType() == ProgressEventType.TRANSFER_FAILED_EVENT) {
+                            logger.error("[{}] S3 Error: Upload failed for {}", decodedFileName, file.getName());
+                        } else if (event.getEventType() == ProgressEventType.TRANSFER_COMPLETED_EVENT) {
+                            /*
+                            try {
+//                                logger.error("[{}] S3 Upload partied complete for {}", decodedFileName, file.getName());
+//                                if (putArchiveComplete(apiBaseUri, apiArchiveCompleteUri, getAppName(file.getName()))) {
+//                                    logger.error("[{}] Called API complete for {}", decodedFileName, file.getName());
+//                                    Files.delete(file.toPath());
+//                                }
+                            } catch (IOException e) {
+                                logger.error(ExceptionUtils.getStackTrace(e));
+                            }
+                            */
+                            logger.info("File {}{} uploaded to S3", s3Path, file.getName());
+                        }
+                    });
+
+                    // Upload part and add response to our list.
+                    MultiPartFileUploader uploader = new MultiPartFileUploader(s3Client, uploadRequest);
+                    uploaders.add(uploader);
+                    uploader.upload();
+
+                    filePosition += partSize;
+                }
+
+                for (MultiPartFileUploader uploader : uploaders) {
+                    uploader.join();
+                    partETags.add(uploader.getPartETag());
+                }
+                // Step 3: complete.
+                CompleteMultipartUploadRequest compRequest =
+                        new CompleteMultipartUploadRequest(bucketName,
+                                s3FileName,
+                                initResponse.getUploadId(),
+                                partETags);
+
+                logger.info("[{}] S3 Upload complete for {} bucket {} {}", decodedFileName, file.getName(), bucketName, s3FileName);
+                s3Client.completeMultipartUpload(compRequest);
+                if (putArchiveComplete(apiBaseUri, apiArchiveCompleteUri, getAppName(file.getName()))) {
+                    logger.info("[{}] Called API complete for {}", decodedFileName, file.getName());
+                    Files.delete(file.toPath());
+                }
+            }
+            catch (Throwable t) {
+                logger.error("Unable to put object as multipart to Amazon S3 for file " + file.getName(), t);
+                s3Client.abortMultipartUpload(
+                        new AbortMultipartUploadRequest(
+                                bucketName, file.getName(), initResponse.getUploadId()));
+            }
+
+
+
+
+            /*
             final AmazonS3 s3 = getAmazonS3();
             final PutObjectRequest putRequest = new PutObjectRequest(getStorageName(), s3Path + decodedFileName, file);
 
@@ -118,9 +222,18 @@ public class PuffAmazonS3StorageClient extends StorageClient {
                 }
             });
             s3.putObject(putRequest);
+            */
         } else {
             logger.error("Parsing appName from [{}] has failed! S3 upload canceled!", file.getName());
         }
+    }
+
+    private static List<PartETag> getETags(List<CopyPartResult> responses) {
+        List<PartETag> etags = new ArrayList<PartETag>();
+        for (CopyPartResult response : responses) {
+            etags.add(new PartETag(response.getPartNumber(), response.getETag()));
+        }
+        return etags;
     }
 
     public void setStoragePrefix(String storagePrefix) {
@@ -175,6 +288,32 @@ public class PuffAmazonS3StorageClient extends StorageClient {
         }
 
         return false;
+    }
+
+
+    private static class MultiPartFileUploader extends Thread {
+
+        private AmazonS3 s3Client;
+        private UploadPartRequest uploadRequest;
+        private PartETag partETag;
+
+        MultiPartFileUploader(AmazonS3 s3Client, UploadPartRequest uploadRequest) {
+            this.s3Client = s3Client;
+            this.uploadRequest = uploadRequest;
+        }
+
+        @Override
+        public void run() {
+            partETag = s3Client.uploadPart(uploadRequest).getPartETag();
+        }
+
+        private PartETag getPartETag() {
+            return partETag;
+        }
+
+        private void upload() {
+            start();
+        }
     }
 }
 
